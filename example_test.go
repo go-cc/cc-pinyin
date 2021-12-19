@@ -52,7 +52,7 @@ func Example_output() {
 	// zhōng guó rén de 〖zhōng guó yín xíng 〗，hěn .xíng .。
 	// zho1ng guo2 re2n de 〖zho1ng guo2 yi2n xi2ng 〗，he3n .xi2ng .。
 	// zhong1 guo2 ren2 de 〖zhong1 guo2 yin2 xing2 〗，hen3 .xing2 .。
-	// zho1ng/zho4ng guo2 ren2 de/di4/di2 〖zho1ng/zho4ng guo2 yin2 xi2ng/ha2ng/xi4ng/ha4ng/he2ng 〗，hen3 .xi2ng/ha2ng/xi4ng/ha4ng/he2ng .。
-	// zhōng/zhòng guó rén de/dì/dí 〖zhōng/zhòng guó yín xíng/háng/xìng/hàng/héng 〗，hěn .xíng/háng/xìng/hàng/héng .。
+	// zho1ng/zho4ng guo2 ren2 de/di1/di2/di4 〖zho1ng/zho4ng guo2 yin2 xi2ng/ha2ng/he2ng/xi4ng/ha4ng 〗，hen3 .xi2ng/ha2ng/he2ng/xi4ng/ha4ng .。
+	// zhōng/zhòng guó rén de/dī/dí/dì 〖zhōng/zhòng guó yín xíng/háng/héng/xìng/hàng 〗，hěn .xíng/háng/héng/xìng/hàng .。
 	// 中(Zhōng) 国(Guó) 银(Yín) 行(Xíng) 。
 }
