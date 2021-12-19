@@ -1,42 +1,48 @@
+////////////////////////////////////////////////////////////////////////////
+// Porgram: pinyin
+// Purpose: pinyin conversion Go library
+// Authors: Tong Sun (c) 2017, All rights reserved
+// Credits: Copyright (c) 2016 mozillazg, 闲耘
+// 	        https://github.com/mozillazg/go-pinyin/
+////////////////////////////////////////////////////////////////////////////
+
 package pinyin
 
 import (
+	"bytes"
+	"fmt"
 	"regexp"
 	"strings"
+
+	"github.com/go-shaper/shaper"
 )
 
-// Meta
-const (
-	Version   = "0.19.0"
-	Author    = "mozillazg, 闲耘"
-	License   = "MIT"
-	Copyright = "Copyright (c) 2016 mozillazg, 闲耘"
+// VERSION defines the running build id.
+var (
+	VERSION   = "0.20.0"
+	buildTime = "2017-05-03"
 )
 
-// 拼音风格(推荐)
+// == 拼音风格
 const (
-	Normal      = 0 // 普通风格，不带声调（默认风格）。如： zhong guo
-	Tone        = 1 // 声调风格1，拼音声调在韵母第一个字母上。如： zhōng guó
-	Tone2       = 2 // 声调风格2，即拼音声调在各个韵母之后，用数字 [1-4] 进行表示。如： zho1ng guo2
-	Tone3       = 8 // 声调风格3，即拼音声调在各个拼音之后，用数字 [1-4] 进行表示。如： zhong1 guo2
-	Initials    = 3 // 声母风格，只返回各个拼音的声母部分。如： zh g 。注意：不是所有的拼音都有声母
-	FirstLetter = 4 // 首字母风格，只返回拼音的首字母部分。如： z g
-	Finals      = 5 // 韵母风格，只返回各个拼音的韵母部分，不带声调。如： ong uo
-	FinalsTone  = 6 // 韵母风格1，带声调，声调在韵母第一个字母上。如： ōng uó
-	FinalsTone2 = 7 // 韵母风格2，带声调，声调在各个韵母之后，用数字 [1-4] 进行表示。如： o1ng uo2
-	FinalsTone3 = 9 // 韵母风格3，带声调，声调在各个拼音之后，用数字 [1-4] 进行表示。如： ong1 uo2
+	Normal = iota // 普通风格，不带声调（默认风格）。如： zhong guo
 )
 
-// 拼音风格(兼容之前的版本)
+// -- 声调风格 Tone
 const (
-	NORMAL       = Normal
-	TONE         = Tone
-	TONE2        = Tone2
-	INITIALS     = Initials
-	FIRST_LETTER = FirstLetter
-	FINALS       = Finals
-	FINALS_TONE  = FinalsTone
-	FINALS_TONE2 = FinalsTone2
+	_     = iota
+	Tone1 // 声调风格1，即拼音声调在各个拼音之后，用数字 [1-4] 进行表示。如： zhong1 guo2
+	Tone2 // 声调风格2，即拼音声调在各个韵母之后，用数字 [1-4] 进行表示。如： zho1ng guo2
+	Tone3 // 声调风格3，拼音声调在韵母上。如： zhōng guó
+)
+
+// -- 部分返回 Truncate
+const (
+	FirstLetter   = iota + 1 // 1: 首字母风格，只返回拼音的首字母部分。如： z g
+	Initials                 // 2: 声母风格，只返回各个拼音的声母部分。如： zh g
+	ZeroConsonant = iota + 6 // 8: 支持零声母功能, wén -> -> uén
+	Finals                   // 9: 韵母风格，只返回各个拼音的韵母部分。如： ong uo, wén -> w -> én
+	Both          = 11       // 11: 双显风格，返回 汉字 + 拼音
 )
 
 // 声母表
@@ -57,35 +63,20 @@ var rePhoneticSymbolSource = func(m map[string]string) string {
 // 匹配带声调字符的正则表达式
 var rePhoneticSymbol = regexp.MustCompile("[" + rePhoneticSymbolSource + "]")
 
-// 匹配使用数字标识声调的字符的正则表达式
-var reTone2 = regexp.MustCompile("([aeoiuvnm])([1-4])$")
-
-// 匹配 Tone2 中标识韵母声调的正则表达式
-var reTone3 = regexp.MustCompile("^([a-z]+)([1-4])([a-z]*)$")
-
-// Args 配置信息
-type Args struct {
-	Style     int    // 拼音风格（默认： Normal)
-	Heteronym bool   // 是否启用多音字模式（默认：禁用）
-	Separator string // Slug 中使用的分隔符（默认：-)
-
-	// 处理没有拼音的字符（默认忽略没有拼音的字符）
-	// 函数返回的 slice 的长度为0 则表示忽略这个字符
-	Fallback func(r rune, a Args) []string
+// Style 配置拼音风格 (声调风格 + 部分返回)
+type Style struct {
+	tone     int // 拼音风格（默认： Normal)
+	truncate int // 部分返回
 }
 
-// Style 默认配置：风格
-var Style = Normal
+// Pinyin with 配置信息
+type Pinyin struct {
+	Style
+	Separator   string // 使用的分隔符（默认：" ")
+	polyphone   bool   // 是否启用多音字模式（默认：禁用）
+	capitalized bool   // 首字母大写
 
-// Heteronym 默认配置：是否启用多音字模式
-var Heteronym = false
-
-// Separator 默认配置： `Slug` 中 Join 所用的分隔符
-var Separator = "-"
-
-// Fallback 默认配置: 如何处理没有拼音的字符(忽略这个字符)
-var Fallback = func(r rune, a Args) []string {
-	return []string{}
+	shaper *Shaper
 }
 
 var finalExceptionsMap = map[string]string{
@@ -94,43 +85,43 @@ var finalExceptionsMap = map[string]string{
 	"ǔ": "ǚ",
 	"ù": "ǜ",
 }
-var reFinalExceptions = regexp.MustCompile("^(j|q|x)(ū|ú|ǔ|ù)$")
-var reFinal2Exceptions = regexp.MustCompile("^(j|q|x)u(\\d?)$")
 
-// NewArgs 返回包含默认配置的 `Args`
-func NewArgs() Args {
-	return Args{Style, Heteronym, Separator, Fallback}
+// NewPinyin 返回包含默认配置的 `Pinyin`
+func NewPinyin(tone, truncate int, separator string, _polyphone, _capitalized bool) Pinyin {
+	a := Pinyin{Style: Style{tone, truncate},
+		Separator:   separator,
+		polyphone:   _polyphone,
+		capitalized: _capitalized,
+	}
+	if a.truncate != ZeroConsonant {
+		// 简明整齐的处理声母韵母 ref mozillazg/go-pinyin/issues/18
+		// both y and w are considered 声母, add them back
+		initialArray = append(initialArray, "y", "w")
+	}
+	a.shaper = NewShaper()
+	if a.truncate != Normal {
+		a.shaper.ApplyTruncate(a)
+	}
+	if a.tone != Tone3 {
+		a.shaper.ApplyToneShaping(a)
+	}
+	if a.capitalized {
+		a.shaper.ApplyTitle()
+	}
+	return a
 }
 
-// 获取单个拼音中的声母
-func initial(p string) string {
-	s := ""
-	for _, v := range initialArray {
-		if strings.HasPrefix(p, v) {
-			s = v
-			break
-		}
-	}
-	return s
+////////////////////////////////////////////////////////////////////////////
+// Extending shaper.Shaper
+
+// Shaper extends shaper.Shaper
+type Shaper struct {
+	*shaper.Shaper
 }
 
-// 获取单个拼音中的韵母
-func final(p string) string {
-	n := initial(p)
-	if n == "" {
-		return handleYW(p)
-	}
-
-	// 特例 j/q/x
-	matches := reFinalExceptions.FindStringSubmatch(p)
-	// jū -> jǖ
-	if len(matches) == 3 && matches[1] != "" && matches[2] != "" {
-		v, _ := finalExceptionsMap[matches[2]]
-		return v
-	}
-	// ju -> jv, ju1 -> jv1
-	p = reFinal2Exceptions.ReplaceAllString(p, "${1}v$2")
-	return strings.Join(strings.SplitN(p, n, 2), "")
+// NewShaper makes a new Shaper filter
+func NewShaper() *Shaper {
+	return &Shaper{Shaper: shaper.NewShaper()}
 }
 
 // 处理 y, w
@@ -150,126 +141,137 @@ func handleYW(p string) string {
 	return p
 }
 
-func toFixed(p string, a Args) string {
-	if a.Style == Initials {
-		return initial(p)
-	}
-	origP := p
-
-	// 替换拼音中的带声调字符
-	py := rePhoneticSymbol.ReplaceAllStringFunc(p, func(m string) string {
-		symbol, _ := phoneticSymbol[m]
-		switch a.Style {
-		// 不包含声调
-		case Normal, FirstLetter, Finals:
-			// 去掉声调: a1 -> a
-			m = reTone2.ReplaceAllString(symbol, "$1")
-		case Tone2, FinalsTone2, Tone3, FinalsTone3:
-			// 返回使用数字标识声调的字符
-			m = symbol
-		default:
-			// 声调在头上
+func (sp *Shaper) ApplyToneShaping(a Pinyin) *Shaper {
+	sp.AddShaper(func(p string) string {
+		if a.truncate == Initials || a.tone == Tone3 {
+			// already shortened or no need to change
+			return p
 		}
-		return m
-	})
 
-	switch a.Style {
-	// 将声调移动到最后
-	case Tone3, FinalsTone3:
-		py = reTone3.ReplaceAllString(py, "$1$3$2")
-	}
-	switch a.Style {
-	// 首字母
-	case FirstLetter:
-		py = string([]rune(py)[0])
-	// 韵母
-	case Finals, FinalsTone, FinalsTone2, FinalsTone3:
+		// 替换拼音中的带声调字符
+		py := rePhoneticSymbol.ReplaceAllStringFunc(p, func(m string) string {
+			symbol, _ := phoneticSymbol[m]
+			switch a.tone {
+			// 不包含声调
+			case Normal:
+				// 去掉声调: a1 -> a 匹配使用数字标识声调的字符的正则表达式
+				m = regexp.MustCompile("([aeoiuvnm])([1-4])$").
+					ReplaceAllString(symbol, "$1")
+			case Tone2, Tone1:
+				// 返回使用数字标识声调的字符
+				m = symbol
+			default:
+				// 声调在头上
+			}
+			return m
+		})
+
+		if a.tone == Tone1 {
+			// 将声调移动到最后. 匹配 Tone2 中标识韵母声调的正则表达式
+			py = regexp.MustCompile("^([a-z]+)([1-4])([a-z]*)$").
+				ReplaceAllString(py, "$1$3$2")
+		}
+		return py
+	})
+	return sp
+}
+
+func (sp *Shaper) ApplyTruncate(a Pinyin) *Shaper {
+	sp.AddShaper(func(p string) string {
+		if a.truncate == Both {
+			// 双显风格，返回 全部拼音
+			return p
+		}
+
+		if a.truncate == FirstLetter {
+			// 首字母
+			return p[:1]
+		}
+
+		// 获取拼音中的声母
+		s, y := "", ""
+		for _, v := range initialArray {
+			if strings.HasPrefix(p, v) {
+				s = v
+				y = p[len(s):]
+				break
+			}
+		}
+
+		if a.truncate == Initials {
+			// 声母风格
+			return s
+		}
+
+		// 韵母风格
+
 		// 转换为 []rune unicode 编码用于获取第一个拼音字符
 		// 因为 string 是 utf-8 编码不方便获取第一个拼音字符
-		rs := []rune(origP)
+		rs := []rune(p)
 		switch string(rs[0]) {
 		// 因为鼻音没有声母所以不需要去掉声母部分
 		case "ḿ", "ń", "ň", "ǹ":
-		default:
-			py = final(py)
+			return p
 		}
-	}
-	return py
-}
 
-func applyStyle(p []string, a Args) []string {
-	newP := []string{}
-	for _, v := range p {
-		newP = append(newP, toFixed(v, a))
-	}
-	return newP
-}
-
-// SinglePinyin 把单个 `rune` 类型的汉字转换为拼音.
-func SinglePinyin(r rune, a Args) []string {
-	if a.Fallback == nil {
-		a.Fallback = Fallback
-	}
-	value, ok := PinyinDict[int(r)]
-	pys := []string{}
-	if ok {
-		pys = strings.Split(value, ",")
-	} else {
-		pys = a.Fallback(r, a)
-	}
-	if len(pys) > 0 {
-		if !a.Heteronym {
-			pys = []string{pys[0]}
+		// ǖ 特例 j/q/x/y
+		matches := regexp.MustCompile("^(j|q|x|y)(ū|ú|ǔ|ù)$").FindStringSubmatch(p)
+		// jū -> jǖ
+		if len(matches) == 3 && matches[1] != "" && matches[2] != "" {
+			y, _ = finalExceptionsMap[matches[2]]
 		}
-		return applyStyle(pys, a)
-	}
-	return pys
+		matches = regexp.MustCompile("^(j|q|x|y)(u)").FindStringSubmatch(p)
+		// yuán -> yván
+		if len(matches) == 3 && matches[1] != "" && matches[2] != "" {
+			y = "v" + p[2:] // yu -> v
+		}
+
+		// 简明整齐的处理声母韵母
+		if a.truncate == Finals {
+			return y
+		}
+
+		// 获取拼音中的韵母
+		if s == "" {
+			y = handleYW(p)
+		}
+
+		return y
+	})
+	return sp
 }
 
-// Pinyin 汉字转拼音，支持多音字模式.
-func Pinyin(s string, a Args) [][]string {
-	pys := [][]string{}
+// Convert 汉字转拼音，支持多音字模式.
+// If enabled Polyphone, then separate the returns with '/'.
+// E.g., for input like "我的银行不行", the output is
+// wo de yin hang/xing bu hang/xing.
+func (a Pinyin) Convert(s string) string {
+	pys := bytes.NewBufferString("")
 	for _, r := range s {
-		py := SinglePinyin(r, a)
-		if len(py) > 0 {
-			pys = append(pys, py)
+		if r <= '~' {
+			pys.WriteString(string(r))
+			continue
+		}
+		value, ok := PinyinDict[int(r)]
+		if !ok {
+			pys.WriteString(string(r))
+			continue
+		}
+		firstComma := strings.Index(value, ",")
+		if !a.polyphone && firstComma > 0 {
+			value = value[:firstComma]
+		}
+		// 多音字模式 (Polyphone), output likes "hang/xing"
+		if a.polyphone && firstComma > 0 {
+			value = strings.Replace(value, ",", "/", -1)
+		}
+		py := a.shaper.Process(value)
+		if a.truncate == Both {
+			// 双显风格
+			fmt.Fprintf(pys, "%s(%s)%s", string(r), py, a.Separator)
+		} else {
+			pys.WriteString(py + a.Separator)
 		}
 	}
-	return pys
-}
-
-// LazyPinyin 汉字转拼音，与 `Pinyin` 的区别是：
-// 返回值类型不同，并且不支持多音字模式，每个汉字只取第一个音.
-func LazyPinyin(s string, a Args) []string {
-	a.Heteronym = false
-	pys := []string{}
-	for _, v := range Pinyin(s, a) {
-		pys = append(pys, v[0])
-	}
-	return pys
-}
-
-// Slug join `LazyPinyin` 的返回值.
-// 建议改用 https://github.com/mozillazg/go-slugify
-func Slug(s string, a Args) string {
-	separator := a.Separator
-	return strings.Join(LazyPinyin(s, a), separator)
-}
-
-// Convert 跟 Pinyin 的唯一区别就是 a 参数可以是 nil
-func Convert(s string, a *Args) [][]string {
-	if a == nil {
-		args := NewArgs()
-		a = &args
-	}
-	return Pinyin(s, *a)
-}
-
-// LazyConvert 跟 LazyPinyin 的唯一区别就是 a 参数可以是 nil
-func LazyConvert(s string, a *Args) []string {
-	if a == nil {
-		args := NewArgs()
-		a = &args
-	}
-	return LazyPinyin(s, *a)
+	return pys.String()
 }
