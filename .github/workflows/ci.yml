@@ -39,9 +39,3 @@ jobs:
     - name: Test
       run: go test -v .
 
-    - name: Test cmd
-      run: |
-        go get ./cmd/pinyin
-        go run cmd/pinyin/main.go 测试
-        go run cmd/pinyin/main.go -s zhao 测试
-        echo 测试 | go run cmd/pinyin/main.go
